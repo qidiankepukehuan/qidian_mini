@@ -1,0 +1,17 @@
+[app]
+port = 4502
+
+[github]
+redirect_uri = "https://contribute.qidian.space"
+repo_path = "https://github.com/qidiankepukehuan/qidiankepukehuan"
+
+[smtp]
+username = "tsblydyzbjb@163.com"
+host = "smtp.163.com"
+
+[admin]
+emails = [
+    "tsblydyzbjb@qidian.space",
+    "mudern@qidian.space",
+    "shikou@qidian.space"
+]
