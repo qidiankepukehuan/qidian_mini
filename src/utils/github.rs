@@ -159,9 +159,27 @@ impl Submission{
         let mut push_options = PushOptions::new();
         push_options.remote_callbacks(callbacks);
         let mut remote = repo.find_remote("origin")?;
-        remote.push(&[&format!("refs/heads/{}", self.branch)], Some(&mut push_options))?;
 
-        println!("push branch '{}'", self.branch);
+        let mut attempt = 0;
+        let max_attempts = 5;
+        loop {
+            attempt += 1;
+            match remote.push(&[&format!("refs/heads/{}", self.branch)], Some(&mut push_options)) {
+                Ok(_) => {
+                    println!("push branch '{}' success on attempt {}", self.branch, attempt);
+                    break;
+                }
+                Err(e) if attempt < max_attempts => {
+                    println!("push attempt {} failed: {}. Retrying...", attempt, e);
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+                Err(e) => {
+                    println!("push attempt {} failed: {}. No more retries.", attempt, e);
+                    return Err(Box::new(e));
+                }
+            }
+        }
+
         Ok(())
     }
 
