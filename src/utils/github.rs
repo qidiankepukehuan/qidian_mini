@@ -2,11 +2,11 @@ use crate::config::AppConfig;
 use crate::handler::submit::SubmissionRequest;
 use crate::utils::file::{Markdown, ToHexo};
 use crate::utils::picture::Base64Image;
-use git2::{Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository, Signature};
+use octocrab::models::repos::Object;
+use octocrab::params::repos::Reference;
 use octocrab::Octocrab;
 use secrecy::ExposeSecret;
-use std::fs;
-use tempfile::tempdir;
+use urlencoding::encode;
 use uuid::Uuid;
 
 pub struct Submission {
@@ -105,81 +105,80 @@ impl Submission{
             submission_request.images,
         )
     }
-    pub fn push_branch(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn push_branch(&self) -> Result<(), Box<dyn std::error::Error>> {
         let config = AppConfig::global();
         let repo_url = config.github.repo_path.clone();
-
-        // 1 临时目录
-        let tmp_dir = tempdir()?;
-        let repo_path = tmp_dir.path();
-
-        // 2 克隆仓库
-        let repo = Repository::clone(&repo_url, repo_path)?;
-
-        // 3 创建唯一分支
-        let head_ref = repo.head()?.target().expect("HEAD should point to a commit");
-        let branch = repo.branch(&self.branch, &repo.find_commit(head_ref)?, false)?;
-        let branch_ref = branch.get().name().unwrap();
-        let obj = repo.revparse_single(branch_ref)?;
-        repo.checkout_tree(&obj, None)?;
-        repo.set_head(branch_ref)?;
-
-        // 4 保存 Markdown
-        let md_path = repo_path.join(format!("source/_posts/{}.md", self.title));
-        fs::write(&md_path, self.to_hexo())?;
-
-        // 保存 cover
-        let cover_path = repo_path.join(format!("source/_posts/{}/cover.webp", self.title));
-        self.cover.save(&cover_path)?;
-
-        // 保存其他图片
-        for (idx, img) in self.images.iter().enumerate() {
-            let img_path = repo_path.join(format!("source/photos/{}/{}.webp", self.title, idx+1));
-            img.save(&img_path)?;
-        }
-
-        // 5 git add + commit
-        let mut index = repo.index()?;
-        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = Signature::now(&self.author, &self.email)?;
-        let parent_commit = repo.find_commit(head_ref)?;
-        repo.commit(Some("HEAD"), &sig, &sig, "Add new submission", &tree, &[&parent_commit])?;
-
-        // 6 push 分支 - 使用 PAT 进行认证
         let pat = config.github.personal_access_token.expose_secret().clone();
-        let pat_clone = pat.clone();
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, _user, _cred| {
-            // 使用 PAT 作为密码，用户名为 "git"
-            Cred::userpass_plaintext("git", &pat_clone)
-        });
-        let mut push_options = PushOptions::new();
-        push_options.remote_callbacks(callbacks);
-        let mut remote = repo.find_remote("origin")?;
 
-        let mut attempt = 0;
-        let max_attempts = 5;
-        loop {
-            attempt += 1;
-            match remote.push(&[&format!("refs/heads/{}", self.branch)], Some(&mut push_options)) {
-                Ok(_) => {
-                    println!("push branch '{}' success on attempt {}", self.branch, attempt);
-                    break;
-                }
-                Err(e) if attempt < max_attempts => {
-                    println!("push attempt {} failed: {}. Retrying...", attempt, e);
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                }
-                Err(e) => {
-                    println!("push attempt {} failed: {}. No more retries.", attempt, e);
-                    return Err(Box::new(e));
-                }
-            }
+        // 提取 owner/repo
+        let parts: Vec<String> = repo_url
+            .trim_end_matches(".git")
+            .rsplitn(3, '/')
+            .map(|p| p.to_string())
+            .collect();
+        let repo_name = parts[0].clone();
+        let owner_name = parts[1].clone();
+
+        let octocrab = Octocrab::builder().personal_token(pat.clone()).build()?;
+
+        // 1 获取 main 分支最新 SHA
+        let main_ref = octocrab
+            .repos(owner_name.clone(), repo_name.clone())
+            .get_ref(&Reference::Branch("main".to_string()))
+            .await?;
+        let main_sha = match main_ref.object {
+            Object::Commit { sha, .. } => sha,
+            _ => return Err("heads/main did not point to a Commit".into()),
+        };
+
+        // 2 创建唯一分支（指向 main）
+        octocrab
+            .repos(owner_name.clone(), repo_name.clone())
+            .create_ref(&Reference::Branch(self.branch.clone()), main_sha)
+            .await?;
+
+        // 工具闭包：对 URL 的每个路径段做百分号编码
+        let encode_path = |p: &str| {
+            p.split('/')
+                .map(|seg| encode(seg).into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+
+        // 3 提交 Markdown
+        let md_path_encoded = encode_path(&format!("source/_posts/{}.md", self.title));
+        let md_bytes = self.to_hexo().into_bytes();
+        octocrab
+            .repos(owner_name.clone(), repo_name.clone())
+            .create_file(md_path_encoded, "Add new submission: markdown", md_bytes)
+            .branch(&self.branch)
+            .send()
+            .await?;
+
+        // 4 保存 cover
+        let cover_path_encoded = encode_path(&format!("source/_posts/{}/cover.webp", self.title));
+        let cover_bytes = self.cover.to_bytes()?;
+        octocrab
+            .repos(owner_name.clone(), repo_name.clone())
+            .create_file(cover_path_encoded, "Add new submission: cover", cover_bytes)
+            .branch(&self.branch)
+            .send()
+            .await?;
+
+        // 5 保存其他图片
+        for (idx, img) in self.images.iter().enumerate() {
+            let img_path_encoded = encode_path(&format!("source/photos/{}/{}.webp", self.title, idx + 1));
+            let img_bytes = img.to_bytes()?;
+            octocrab
+                .repos(owner_name.clone(), repo_name.clone())
+                .create_file(img_path_encoded, "Add new submission: image", img_bytes)
+                .branch(&self.branch)
+                .send()
+                .await?;
         }
 
+        // 6 完成
+        println!("push branch '{}' success", self.branch);
         Ok(())
     }
 
@@ -230,148 +229,6 @@ impl Submission{
             .map_err(|e| format!("Failed to create PR: {}", e))?;
 
         println!("pull request branch '{}'", self.branch);
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod github_tests {
-    use super::*;
-    use git2::{Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository, Signature};
-    use octocrab::params::pulls::State;
-    use octocrab::Octocrab;
-    use std::fs;
-    use tempfile::tempdir;
-    use uuid::Uuid;
-
-    // 1x1 像素的 WEBP 图像（白色）
-    const TEST_WEBP_BASE64: &str = "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=";
-
-    // 只有在有complete参数时才进行该段测试
-    #[tokio::test]
-    async fn test_submission_pull_request_sandbox() -> Result<(), Box<dyn std::error::Error>> {
-        if !std::env::args().any(|arg| arg == "--complete") {
-            eprintln!("Skipping GitHub test because --complete was not provided");
-            return Ok(());
-        }
-
-        // 构造测试 Submission
-        let submission = Submission {
-            author: "Test Author".to_string(),
-            email: "test@example.com".to_string(),
-            title: "Test PR".to_string(),
-            tags: vec!["rust".to_string()],
-            content: "Testing PR creation.".to_string(),
-            cover: Base64Image::new(TEST_WEBP_BASE64.to_string(), "cover.webp".to_string()),
-            images: vec![],
-            branch:"".to_string(),
-        };
-
-        let config = AppConfig::global();
-        let repo_url = config.github.repo_path.clone();
-        let pat = config.github.personal_access_token.expose_secret().clone(); // 使用 PAT
-        let owner_repo: Vec<&str> = repo_url.trim_end_matches(".git").rsplitn(3, '/').collect();
-        let repo_name = owner_repo[0];
-        let owner_name = owner_repo[1];
-
-        // 1. 临时目录
-        let tmp_dir = tempdir()?;
-        let repo_path = tmp_dir.path();
-
-        // 2. 克隆仓库
-        let pat_clone = pat.clone();
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, _user, _cred| {
-            // 使用 PAT 作为密码
-            Cred::userpass_plaintext("git", &pat_clone)
-        });
-
-        let mut fetch_options = git2::FetchOptions::new();
-        fetch_options.remote_callbacks(callbacks);
-
-        let repo = Repository::clone(repo_url.as_str(), repo_path)?;
-
-        // 3. 创建唯一分支
-        let branch_name = format!("test-contrib-{}", Uuid::new_v4());
-        let head_ref = repo.head()?.target().unwrap();
-        let commit = repo.find_commit(head_ref)?;
-        let branch = repo.branch(&branch_name, &commit, false)?;
-        let branch_ref = branch.get().name().unwrap();
-        let obj = repo.revparse_single(branch_ref)?;
-        repo.checkout_tree(&obj, None)?;
-        repo.set_head(branch_ref)?;
-
-        // 4. 保存 Markdown
-        let md_path = repo_path.join(format!("source/_posts/{}.md", submission.title));
-        fs::write(&md_path, submission.to_hexo())?;
-
-        // 保存 cover
-        let cover_path = repo_path.join(format!("source/_posts/{}/cover.webp", submission.title));
-        submission.cover.save(&cover_path)?;
-
-        // 5. git add + commit
-        let mut index = repo.index()?;
-        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
-        index.write()?;
-        let tree_oid = index.write_tree()?;
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = Signature::now(&submission.author, &submission.email)?;
-        repo.commit(Some("HEAD"), &sig, &sig, "Test submission commit", &tree, &[&commit])?;
-
-        // 6. push 临时分支 - 使用 PAT
-        let mut callbacks = RemoteCallbacks::new();
-        let pat_clone = pat.clone();
-        callbacks.credentials(move |_url, _user, _cred| {
-            Cred::userpass_plaintext("git", &pat_clone)
-        });
-        let mut push_options = PushOptions::new();
-        push_options.remote_callbacks(callbacks);
-        let mut remote = repo.find_remote("origin")?;
-        remote.push(&[&format!("refs/heads/{}", branch_name)], Some(&mut push_options))?;
-
-        // 7. 创建 PR - 使用 PAT
-        let octocrab = Octocrab::builder().personal_token(pat.to_string()).build()?;
-        let pr_title = format!("{}-{}", submission.title, submission.author);
-        let tags_str = if submission.tags.is_empty() {
-            "None".to_string()
-        } else {
-            submission.tags.join(", ")
-        };
-        let pr_body = format!(
-            "Automated submission from contribution form.\n\n\
-            **Title:** {}\n\
-            **Author:** {}\n\
-            **Tags:** {}\n\
-            **Images:** {} (including cover)\n",
-            submission.title,
-            submission.author,
-            tags_str,
-            1 + submission.images.len()
-        );
-
-        let pr = octocrab
-            .pulls(owner_name, repo_name)
-            .create(&pr_title, &branch_name, "main")
-            .body(pr_body)
-            .send()
-            .await?;
-
-        println!("PR created at {}", pr.html_url.unwrap());
-
-        // 8. 验证 PR 成功 → 关闭
-        octocrab.pulls(owner_name, repo_name)
-            .update(pr.number)
-            .state(State::Closed)
-            .send()
-            .await?;
-
-        println!("PR closed.");
-
-        // 9. 删除远程分支
-        let mut remote = repo.find_remote("origin")?;
-        remote.push(&[&format!(":refs/heads/{}", branch_name)], Some(&mut push_options))?;
-        println!("Remote branch deleted.");
-
         Ok(())
     }
 }

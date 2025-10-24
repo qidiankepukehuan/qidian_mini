@@ -44,7 +44,7 @@ pub async fn submit_article(Json(payload): Json<SubmissionRequest>) -> ApiRespon
     let submission = Submission::from_request(payload);
 
     // 调用同步 pull_request
-    if let Err(e) = submission.push_branch() {
+    if let Err(e) = submission.push_branch().await {
         return ApiResponse::error(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("推送分支失败: {}", e),

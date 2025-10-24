@@ -45,5 +45,6 @@ image = "0.25.1"
 # 临时文件库
 tempfile = "3.23.0"
 # git操作封装库
-git2 = "0.20.2"
-octocrab = "0.46.0"
+octocrab = "0.47.0"
+# url编码转化
+urlencoding = "2.1.3"

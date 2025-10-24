@@ -21,6 +21,14 @@ impl Base64Image {
     pub fn to_decode_image(&self) -> DecodedImage {
         decode_base64_image(self).unwrap()
     }
+    /// 解码成原始字节（支持带 data: 前缀的 base64）
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        let s = self.base64.as_str();
+        let raw = s.split(',').next_back().unwrap_or(s);
+        general_purpose::STANDARD
+            .decode(raw)
+            .map_err(|e| format!("Base64解码失败 ({}): {}", self.name, e))
+    }
     pub fn save(&self, path: &Path)->Result<(),String>{
         self.to_decode_image().save(path)
     }
