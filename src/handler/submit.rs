@@ -1,9 +1,9 @@
 use crate::response::ApiResponse;
-use axum::http::StatusCode;
 use axum::Json;
+use axum::http::StatusCode;
 
 use crate::config::AppConfig;
-use crate::middleware::mem_map::MemMap;
+use crate::handler::auth::verify_code;
 use crate::utils::email::{Mailer, SmtpMailer};
 use crate::utils::github::Submission;
 use crate::utils::picture::Base64Image;
@@ -24,20 +24,9 @@ pub struct SubmissionRequest {
 
 #[debug_handler]
 pub async fn submit_article(Json(payload): Json<SubmissionRequest>) -> ApiResponse<()> {
-    let cache = MemMap::global();
-
     // 先校验验证码
-    match cache.get::<String>(&payload.email) {
-        Some(code) if code == payload.email_code => {
-            // 验证成功，删除验证码，防止重放
-            cache.remove(&payload.email);
-        }
-        _ => {
-            return ApiResponse::error(
-                StatusCode::UNAUTHORIZED,
-                "验证码错误或已过期",
-            );
-        }
+    if !verify_code(payload.email.clone(), payload.email_code.clone()) {
+        return ApiResponse::error(StatusCode::UNAUTHORIZED, "验证码错误或已过期");
     }
 
     // 构造 Submission
@@ -57,7 +46,7 @@ pub async fn submit_article(Json(payload): Json<SubmissionRequest>) -> ApiRespon
             &format!("提交失败: {}", e),
         );
     }
-    
+
     let emails = AppConfig::global().admin.email.clone();
     let mailer = SmtpMailer::global();
 
