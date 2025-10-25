@@ -113,7 +113,11 @@ mod tests {
         let cache = MemMap::global();
 
         cache.insert("num".to_string(), 42u32, Duration::seconds(2));
-        cache.insert("text".to_string(), "hello".to_string(), Duration::seconds(2));
+        cache.insert(
+            "text".to_string(),
+            "hello".to_string(),
+            Duration::seconds(2),
+        );
 
         assert_eq!(cache.get::<String, u32>(&"num".to_string()), Some(42));
         assert_eq!(
@@ -142,7 +146,11 @@ mod tests {
         let cache = MemMap::global();
 
         cache.insert("int".to_string(), 7i32, Duration::seconds(5));
-        cache.insert("string".to_string(), "abc".to_string(), Duration::seconds(5));
+        cache.insert(
+            "string".to_string(),
+            "abc".to_string(),
+            Duration::seconds(5),
+        );
 
         assert_eq!(cache.get::<String, i32>(&"int".to_string()), Some(7));
         assert_eq!(
@@ -180,7 +188,11 @@ mod tests {
             message: "hello-struct".to_string(),
         };
 
-        cache.insert("record_struct".to_string(), record.clone(), Duration::seconds(2));
+        cache.insert(
+            "record_struct".to_string(),
+            record.clone(),
+            Duration::seconds(2),
+        );
 
         let got = cache.get::<String, TestRecord>(&"record_struct".to_string());
         assert_eq!(got, Some(record.clone()));
@@ -215,10 +227,7 @@ mod tests {
         // 再等 1.5 秒 -> 应该过期（TTL=2秒）
         sleep(std::time::Duration::from_millis(1500)).await;
         let expired_value = cache.get::<String, String>(&key);
-        assert!(
-            expired_value.is_none(),
-            "预期 key 在过期后应被清除"
-        );
+        assert!(expired_value.is_none(), "预期 key 在过期后应被清除");
 
         // 重新写入同名 key，验证不会受旧记录影响
         cache.insert(key.clone(), "new_value".to_string(), Duration::seconds(2));
@@ -234,9 +243,6 @@ mod tests {
             Some("new_value".to_string())
         );
 
-        println!(
-            "时间精度测试完成：过期机制在 {:?} 正常触发",
-            Utc::now()
-        );
+        println!("时间精度测试完成：过期机制在 {:?} 正常触发", Utc::now());
     }
 }

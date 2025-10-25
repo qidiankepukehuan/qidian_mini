@@ -4,6 +4,7 @@ use once_cell::sync::OnceCell;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::Deserialize;
 use std::env;
+use std::path::PathBuf;
 
 // 全局配置实例
 static CONFIG: OnceCell<AppConfig> = OnceCell::new();
@@ -14,6 +15,7 @@ pub struct AppConfig {
     pub github: GitHubConfig,
     pub smtp: SmtpConfig,
     pub admin: AdminConfig,
+    pub file_share: FileShareConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +39,11 @@ pub struct AdminConfig {
     pub email: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct FileShareConfig {
+    pub path: PathBuf,
+}
+
 impl AppConfig {
     fn load_config() -> Result<Self, Box<dyn std::error::Error>> {
         // 确保 .env 文件已加载
@@ -48,12 +55,14 @@ impl AppConfig {
             .set_default("github.client_id", "")?
             .set_default("github.client_secret", "")?
             .set_default("github.redirect_uri", "https://contribute.qidian.space")?
-            .set_default("github.repo_path", "https://github.com/qidiankepukehuan/qidiankepukehuan")?
+            .set_default(
+                "github.repo_path",
+                "https://github.com/qidiankepukehuan/qidiankepukehuan",
+            )?
             .set_default("smtp.username", "tsblydyzbjb@qidian.space")?
             .set_default("smtp.host", "smtp.163.com")?
-            .set_default("admin.emails", vec![
-                         "tsblydyzbjb@qidian.space".to_string(),
-                         ])?
+            .set_default("admin.emails", vec!["tsblydyzbjb@qidian.space".to_string()])?
+            .set_default("file.share_path", "./shared")?
             .build()?;
 
         // 尝试从不同前缀的环境变量加载
@@ -71,7 +80,9 @@ impl AppConfig {
 
         let smtp_password = env::var("QIDIAN_MINI_SMTP_PASSWORD")
             .or_else(|_| env::var("SMTP_PASSWORD"))
-            .map_err(|_| "Neither QIDIAN_MINI_SMTP_PASSWORD nor SMTP_PASSWORD found in environment")?;
+            .map_err(
+                |_| "Neither QIDIAN_MINI_SMTP_PASSWORD nor SMTP_PASSWORD found in environment",
+            )?;
 
         Ok(Self {
             port: config.get::<u16>("app.port")?,
@@ -90,14 +101,15 @@ impl AppConfig {
             admin: AdminConfig {
                 email: config.get::<Vec<String>>("admin.emails")?,
             },
+            file_share: FileShareConfig {
+                path: config.get::<PathBuf>("file.share_path")?,
+            },
         })
     }
 
     /// 获取全局配置实例
     pub fn global() -> &'static Self {
-        CONFIG.get_or_init(|| {
-            Self::load_config().expect("Failed to load config")
-        })
+        CONFIG.get_or_init(|| Self::load_config().expect("Failed to load config"))
     }
 }
 
@@ -111,6 +123,7 @@ impl AppConfig {
             !self.smtp.username.is_empty() && !self.smtp.password.expose_secret().is_empty(),
             !self.smtp.host.is_empty(),
             !self.admin.email.is_empty(),
+            !self.file_share.path.as_os_str().is_empty(),
         ];
 
         let ok = checks.iter().filter(|&&c| c).count();
@@ -126,10 +139,18 @@ mod tests {
 
     /// 设置测试环境变量
     fn set_test_env() {
-        unsafe { env::set_var("QIDIAN_MINI_GITHUB_CLIENT_ID", "test_client_id"); }
-        unsafe { env::set_var("QIDIAN_MINI_GITHUB_CLIENT_SECRET", "test_client_secret"); }
-        unsafe { env::set_var("QIDIAN_MINI_GITHUB_PAT", "test_pat"); }
-        unsafe { env::set_var("QIDIAN_MINI_SMTP_PASSWORD", "test_smtp_password"); }
+        unsafe {
+            env::set_var("QIDIAN_MINI_GITHUB_CLIENT_ID", "test_client_id");
+        }
+        unsafe {
+            env::set_var("QIDIAN_MINI_GITHUB_CLIENT_SECRET", "test_client_secret");
+        }
+        unsafe {
+            env::set_var("QIDIAN_MINI_GITHUB_PAT", "test_pat");
+        }
+        unsafe {
+            env::set_var("QIDIAN_MINI_SMTP_PASSWORD", "test_smtp_password");
+        }
     }
 
     #[test]
@@ -140,19 +161,33 @@ mod tests {
         let config = AppConfig::load_config().expect("Failed to load config");
 
         // 验证 github 配置
-        assert_eq!(config.github.client_id.expose_secret().as_str(), "test_client_id");
-        assert_eq!(config.github.client_secret.expose_secret().as_str(), "test_client_secret");
-        assert_eq!(config.github.personal_access_token.expose_secret().as_str(), "test_pat");
+        assert_eq!(
+            config.github.client_id.expose_secret().as_str(),
+            "test_client_id"
+        );
+        assert_eq!(
+            config.github.client_secret.expose_secret().as_str(),
+            "test_client_secret"
+        );
+        assert_eq!(
+            config.github.personal_access_token.expose_secret().as_str(),
+            "test_pat"
+        );
         assert!(!config.github.redirect_uri.is_empty());
         assert!(!config.github.repo_path.is_empty());
 
         // 验证 smtp 配置
-        assert_eq!(config.smtp.password.expose_secret().as_str(), "test_smtp_password");
+        assert_eq!(
+            config.smtp.password.expose_secret().as_str(),
+            "test_smtp_password"
+        );
         assert!(!config.smtp.username.is_empty());
         assert!(!config.smtp.host.is_empty());
 
         // 验证 admin 配置
         assert!(!config.admin.email.is_empty());
+        // 验证路径是否存在
+        assert!(config.file_share.path.exists());
 
         // 验证 stats 方法
         let (ok, total) = config.stats();

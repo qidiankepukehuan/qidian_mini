@@ -1,4 +1,5 @@
 pub mod email;
-pub mod picture;
+pub mod file;
 pub mod github;
-mod file;
+pub mod markdown;
+pub mod picture;

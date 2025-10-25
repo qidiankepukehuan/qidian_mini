@@ -3,11 +3,11 @@ use crate::response::ApiResponse;
 use crate::to_key;
 use crate::utils::email::{Mailer, SmtpMailer};
 use axum::{extract::Json, http::StatusCode};
+use chrono::Duration;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use serde::Deserialize;
 use std::sync::Arc;
-use chrono::Duration;
 
 #[derive(Deserialize)]
 pub struct SendCodeRequest {

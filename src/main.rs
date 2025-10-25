@@ -3,10 +3,10 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 mod config;
-mod response;
-mod routes;
 mod handler;
 mod middleware;
+mod response;
+mod routes;
 mod utils;
 
 #[tokio::main]

@@ -36,7 +36,12 @@ pub async fn share_files(Json(payload): Json<ShareRequest>) -> ApiResponse<()> {
 
     // 将时间戳转为可读时间
     let formatted_time = DateTime::<Utc>::from_timestamp(file.timestamp, 0)
-        .map(|utc_time| utc_time.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string())
+        .map(|utc_time| {
+            utc_time
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|| format!("无效时间戳: {}", file.timestamp));
 
     // 邮件构造

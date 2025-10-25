@@ -1,14 +1,11 @@
-use axum::{
-    routing::get,
-    Router,
-};
-use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 use crate::response::ApiResponse;
+use axum::{Router, routing::get};
+use secrecy::ExposeSecret;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
-pub struct Health{
+pub struct Health {
     config: String,
     github: String,
 }
@@ -16,7 +13,6 @@ pub struct Health{
 pub fn routes() -> Router {
     Router::new().route("/health", get(health))
 }
-
 
 async fn health() -> ApiResponse<Health> {
     let config = AppConfig::global();
