@@ -1,10 +1,11 @@
 use crate::config::AppConfig;
 use crate::handler::submit::SubmissionRequest;
-use crate::utils::file::{Markdown, ToHexo};
+use crate::utils::markdown::{Markdown, ToHexo};
 use crate::utils::picture::Base64Image;
+use anyhow::{Context, Result, anyhow};
+use octocrab::Octocrab;
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
-use octocrab::Octocrab;
 use secrecy::ExposeSecret;
 use urlencoding::encode;
 use uuid::Uuid;
@@ -17,12 +18,12 @@ pub struct Submission {
     pub content: String,
     pub cover: Base64Image,
     pub images: Vec<Base64Image>,
-    pub branch:String,
+    pub branch: String,
 }
 
 impl Submission {
     pub fn to_markdown(&self) -> Markdown {
-        Markdown{
+        Markdown {
             author: self.author.clone(),
             title: self.title.clone(),
             tags: self.tags.clone(),
@@ -34,7 +35,8 @@ impl Submission {
         let additional_images = if self.images.is_empty() {
             "无".to_string()
         } else {
-            self.images.iter()
+            self.images
+                .iter()
                 .map(|img| img.name.clone())
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -72,7 +74,7 @@ impl ToHexo for Submission {
     }
 }
 
-impl Submission{
+impl Submission {
     pub fn new(
         author: String,
         email: String,
@@ -94,7 +96,7 @@ impl Submission{
             branch,
         }
     }
-    pub fn from_request(submission_request:SubmissionRequest)->Self{
+    pub fn from_request(submission_request: SubmissionRequest) -> Self {
         Submission::new(
             submission_request.author,
             submission_request.email,
@@ -105,7 +107,7 @@ impl Submission{
             submission_request.images,
         )
     }
-    pub async fn push_branch(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn push_branch(&self) -> Result<()> {
         let config = AppConfig::global();
         let repo_url = config.github.repo_path.clone();
         let pat = config.github.personal_access_token.expose_secret().clone();
@@ -119,23 +121,29 @@ impl Submission{
         let repo_name = parts[0].clone();
         let owner_name = parts[1].clone();
 
-        let octocrab = Octocrab::builder().personal_token(pat.clone()).build()?;
+        let octocrab = Octocrab::builder()
+            .personal_token(pat.clone())
+            .build()
+            .context("构建 Octocrab 客户端失败")?;
 
         // 1 获取 main 分支最新 SHA
         let main_ref = octocrab
             .repos(owner_name.clone(), repo_name.clone())
             .get_ref(&Reference::Branch("main".to_string()))
-            .await?;
+            .await
+            .context("获取 main 分支引用失败")?;
+
         let main_sha = match main_ref.object {
             Object::Commit { sha, .. } => sha,
-            _ => return Err("heads/main did not point to a Commit".into()),
+            _ => return Err(anyhow!("heads/main 未指向 Commit 对象")),
         };
 
         // 2 创建唯一分支（指向 main）
         octocrab
             .repos(owner_name.clone(), repo_name.clone())
             .create_ref(&Reference::Branch(self.branch.clone()), main_sha)
-            .await?;
+            .await
+            .context("创建分支失败")?;
 
         // 工具闭包：对 URL 的每个路径段做百分号编码
         let encode_path = |p: &str| {
@@ -153,28 +161,33 @@ impl Submission{
             .create_file(md_path_encoded, "Add new submission: markdown", md_bytes)
             .branch(&self.branch)
             .send()
-            .await?;
+            .await
+            .context("提交 Markdown 文件失败")?;
 
         // 4 保存 cover
         let cover_path_encoded = encode_path(&format!("source/_posts/{}/cover.webp", self.title));
-        let cover_bytes = self.cover.to_bytes()?;
+        let cover_bytes = self.cover.to_bytes().context("封面图片编码失败")?;
+
         octocrab
             .repos(owner_name.clone(), repo_name.clone())
             .create_file(cover_path_encoded, "Add new submission: cover", cover_bytes)
             .branch(&self.branch)
             .send()
-            .await?;
+            .await
+            .context("提交封面文件失败")?;
 
         // 5 保存其他图片
         for (idx, img) in self.images.iter().enumerate() {
-            let img_path_encoded = encode_path(&format!("source/photos/{}/{}.webp", self.title, idx + 1));
-            let img_bytes = img.to_bytes()?;
+            let img_path_encoded =
+                encode_path(&format!("source/photos/{}/{}.webp", self.title, idx + 1));
+            let img_bytes = img.to_bytes().context("附加图片编码失败")?;
             octocrab
                 .repos(owner_name.clone(), repo_name.clone())
                 .create_file(img_path_encoded, "Add new submission: image", img_bytes)
                 .branch(&self.branch)
                 .send()
-                .await?;
+                .await
+                .with_context(|| format!("提交第 {} 张图片失败", idx + 1))?;
         }
 
         // 6 完成
@@ -182,13 +195,14 @@ impl Submission{
         Ok(())
     }
 
-    pub async fn pull_request(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn pull_request(&self) -> Result<()> {
         let config = AppConfig::global();
         let pat = config.github.personal_access_token.expose_secret().clone();
 
-        let repo_url_clone =AppConfig::global().github.repo_path.clone();
+        let repo_url_clone = AppConfig::global().github.repo_path.clone();
         let parts: Vec<String> = repo_url_clone
-            .trim_end_matches(".git").rsplitn(3, '/')
+            .trim_end_matches(".git")
+            .rsplitn(3, '/')
             .map(|p| p.to_string())
             .collect();
         let repo_name = parts[0].clone();
@@ -218,7 +232,7 @@ impl Submission{
         let octocrab = Octocrab::builder()
             .personal_token(pat.to_string())
             .build()
-            .map_err(|e| format!("Failed to build Octocrab: {}", e))?;
+            .context("构建 Octocrab 客户端失败")?;
 
         let pr = octocrab
             .pulls(owner_name, repo_name)
@@ -226,7 +240,7 @@ impl Submission{
             .body(pr_body)
             .send()
             .await
-            .map_err(|e| format!("Failed to create PR: {}", e))?;
+            .context("创建 Pull Request 失败")?;
 
         println!("pull request branch '{}'", self.branch);
         Ok(())
