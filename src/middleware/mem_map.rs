@@ -35,11 +35,13 @@ macro_rules! to_key {
 }
 
 type BoxedValue = Box<dyn Any + Send + Sync>;
-type SharedMap = Arc<RwLock<HashMap<String, (BoxedValue, DateTime<Utc>)>>>;
+type CacheEntry = (BoxedValue, DateTime<Utc>);
+type CacheMap = HashMap<String, CacheEntry>;
+type Cache = Arc<RwLock<CacheMap>>;
 
 #[derive(Clone)]
 pub struct MemMap {
-    store: SharedMap,
+    store: Cache,
 }
 
 impl MemMap {
