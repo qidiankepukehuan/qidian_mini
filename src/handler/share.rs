@@ -4,9 +4,9 @@ use crate::response::ApiResponse;
 use crate::utils::email::{Mailer, SmtpMailer};
 use crate::utils::file::ShareFile;
 use anyhow::Context;
-use axum::Json;
 use axum::http::StatusCode;
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use axum::Json;
+use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -19,9 +19,9 @@ pub struct ShareRequest {
 
 pub async fn share_files(Json(payload): Json<ShareRequest>) -> ApiResponse<()> {
     // 校验验证码
-    // if !verify_code(payload.email.clone(), payload.email_code.clone()) {
-    //     return ApiResponse::error(StatusCode::UNAUTHORIZED, "验证码错误或已过期");
-    // }
+    if !verify_code(payload.email.clone(), payload.email_code.clone()) {
+        return ApiResponse::error(StatusCode::UNAUTHORIZED, "验证码错误或已过期");
+    }
 
     // 获取文件（缓存 + 上传 tmpfile.link）
     let file = match ShareFile::get(&payload.apply_for).await {
