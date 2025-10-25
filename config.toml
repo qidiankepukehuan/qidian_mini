@@ -15,3 +15,6 @@ emails = [
     "mudern@qidian.space",
     "shikou@qidian.space"
 ]
+
+[file]
+share_path = "/var"
