@@ -33,6 +33,7 @@ impl Base64Image {
             .decode(raw)
             .map_err(|e| anyhow!("Base64 解码失败 ({}): {}", self.name, e))
     }
+    #[allow(dead_code)]
     pub fn save(&self, path: &Path) -> Result<()> {
         self.to_decode_image()
             .context("图像解码失败")?
