@@ -234,7 +234,7 @@ impl Submission {
             .build()
             .context("构建 Octocrab 客户端失败")?;
 
-        let pr = octocrab
+        let _pr = octocrab
             .pulls(owner_name, repo_name)
             .create(pr_title, self.branch.clone(), "main")
             .body(pr_body)

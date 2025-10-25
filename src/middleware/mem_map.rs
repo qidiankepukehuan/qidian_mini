@@ -7,8 +7,6 @@ use std::{
 };
 use tokio::time::interval;
 
-type BoxedValue = Box<dyn Any + Send + Sync>;
-
 pub trait ToKey {
     fn to_key(&self) -> String;
 }
@@ -36,9 +34,12 @@ macro_rules! to_key {
     };
 }
 
+type BoxedValue = Box<dyn Any + Send + Sync>;
+type SharedMap = Arc<RwLock<HashMap<String, (BoxedValue, DateTime<Utc>)>>>;
+
 #[derive(Clone)]
 pub struct MemMap {
-    store: Arc<RwLock<HashMap<String, (BoxedValue, DateTime<Utc>)>>>,
+    store: SharedMap,
 }
 
 impl MemMap {
@@ -84,6 +85,7 @@ impl MemMap {
     }
 
     /// 手动清理过期数据
+    #[allow(dead_code)]
     pub fn clean_expired(&self) {
         let mut map = self.store.write().unwrap();
         let now = Utc::now();

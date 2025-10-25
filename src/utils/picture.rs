@@ -13,12 +13,14 @@ pub struct Base64Image {
 
 impl Base64Image {
     /// 创建新的Base64图像请求
+    #[allow(dead_code)]
     pub fn new(base64_str: String, image_name: String) -> Self {
         Self {
             base64: base64_str,
             name: image_name,
         }
     }
+    #[allow(dead_code)]
     pub fn to_decode_image(&self) -> Result<DecodedImage> {
         decode_base64_image(self).context("解码 Base64 图像失败")
     }
@@ -41,6 +43,7 @@ impl Base64Image {
 
 /// 表示解码后的图像对象及其格式
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct DecodedImage {
     pub image: DynamicImage,
     pub format: ImageFormat,
@@ -48,6 +51,7 @@ pub struct DecodedImage {
 
 impl DecodedImage {
     /// 将图像保存到指定路径
+    #[allow(dead_code)]
     pub fn save(&self, output_path: &Path) -> Result<()> {
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)
@@ -66,6 +70,7 @@ impl DecodedImage {
 }
 
 /// 将Base64图像请求解码为图像对象
+#[allow(dead_code)]
 pub fn decode_base64_image(request: &Base64Image) -> Result<DecodedImage> {
     // 解码 Base64
     let bytes = general_purpose::STANDARD

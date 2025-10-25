@@ -21,6 +21,7 @@ const FILE_TTL: Duration = Duration::days(3);
 
 /// 缓存中存储的文件信息
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ShareFile {
     pub file_name: String,
     pub timestamp: i64,
