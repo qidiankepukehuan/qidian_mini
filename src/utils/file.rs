@@ -19,6 +19,28 @@ const LIST_TTL: Duration = Duration::minutes(10);
 // 文件3天更新
 const FILE_TTL: Duration = Duration::days(3);
 
+fn validate_filename_only(input: &str) -> Result<String, &'static str> {
+    let s = input.trim();
+    if s.is_empty() {
+        return Err("非法文件名：为空");
+    }
+    if s.contains('/') || s.contains('\\') {
+        return Err("非法文件名：不允许路径分隔符");
+    }
+    if s.contains("..") {
+        return Err("非法文件名：不允许 ..");
+    }
+    // 可按需要决定是否允许以 '.' 开头（隐藏文件）
+    if s.starts_with('.') || s.starts_with('-') {
+        return Err("非法文件名：不允许以 . 或 - 开头");
+    }
+    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.';
+    if !s.chars().all(allowed) {
+        return Err("非法文件名：包含未允许的字符");
+    }
+    Ok(s.to_string())
+}
+
 /// 缓存中存储的文件信息
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -83,15 +105,26 @@ pub struct TmpfileResponse {
 impl ShareFile {
     /// 从缓存或本地文件读取元数据
     pub async fn get(file_name: &str) -> Result<Self> {
+        let allowed = Self::list().await?;
+        if !allowed.contains(&file_name.to_string()) {
+            return Err(anyhow!(
+                "非法文件：请选择 /list_files 返回的文件之一（收到：{}）",
+                file_name
+            ));
+        }
+
+        let safe_name = validate_filename_only(file_name)
+            .map_err(|msg| anyhow::anyhow!(msg))?;
+
         // 检查缓存
         let cache = MemMap::global();
-        let file_key = ShareFileKey::new(file_name);
+        let file_key = ShareFileKey::new(&safe_name);
         if let Some(v) = cache.get::<ShareFileKey, ShareFile>(&file_key) {
             return Ok(v);
         }
 
         let config = AppConfig::global();
-        let file_path = config.file_share.path.join(file_name);
+        let file_path = config.file_share.path.join(&safe_name);
 
         // 文件是否存在
         if !file_path.exists() {
@@ -105,7 +138,7 @@ impl ShareFile {
         let upload_info = Self::upload_to_tmpfile(&file_path).await?;
 
         let share_file = ShareFile {
-            file_name: file_name.to_string(),
+            file_name: safe_name.to_string(),
             timestamp: Utc::now().timestamp(),
             download_link: upload_info.download_link,
             download_link_encoded: upload_info.download_link_encoded,
