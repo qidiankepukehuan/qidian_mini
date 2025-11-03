@@ -29,6 +29,18 @@ pub async fn submit_article(Json(payload): Json<SubmissionRequest>) -> ApiRespon
         return ApiResponse::error(StatusCode::UNAUTHORIZED, "验证码错误或已过期");
     }
 
+    let mailer = SmtpMailer::global();
+
+    if payload.title.trim() == "测试" && payload.author.trim() == "测试" {
+        // 给提交人发一封“测试通过”邮件
+        let _ = mailer.send(
+            &payload.email,
+            "投稿测试：已通过",
+            "测试通过：系统已成功接收测试提交（未执行真实创建分支/PR/发图等逻辑）。",
+        );
+        return ApiResponse::success(());
+    }
+
     // 构造 Submission
     let submission = Submission::from_request(payload);
 
@@ -40,15 +52,21 @@ pub async fn submit_article(Json(payload): Json<SubmissionRequest>) -> ApiRespon
         );
     }
 
-    if let Err(e) = submission.pull_request().await {
-        return ApiResponse::error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("提交失败: {}", e),
-        );
-    }
+    let url = match submission.pull_request().await {
+        Ok(url) => url,
+        Err(e) => {
+            return ApiResponse::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("提交失败: {}", e),
+            )
+        }
+    };
 
     let emails = AppConfig::global().admin.email.clone();
-    let mailer = SmtpMailer::global();
+
+    if let Err(e) = mailer.send(&submission.email, &submission.to_title(), &submission.to_contributor(&url)) {
+        eprintln!("发送邮件给 {} 失败: {}", submission.email, e);
+    }
 
     for email in emails {
         if let Err(e) = mailer.send(&email, &submission.to_title(), &submission.to_info()) {

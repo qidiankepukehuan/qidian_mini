@@ -66,6 +66,38 @@ impl Submission {
     pub fn to_title(&self) -> String {
         format!("{}-{}-{}", self.author, self.email, self.title)
     }
+
+    pub fn to_contributor(&self, pr_url: &str) -> String {
+        format!(
+            r#"感谢您的投稿！
+
+投稿详情：
+- 文章标题：《{}》
+- 作者：{}
+- 标签：{}
+- 投稿邮箱：{}
+
+您的投稿已成功提交！我们已创建 GitHub Pull Request 进行审核处理。
+
+🔗 查看处理进度：{}
+（如链接无法点击，请复制到浏览器打开）
+
+审核流程：
+1. 管理员将会审核您的投稿内容
+2. 审核通过后，您的文章将会被发布
+3. 如有需要修改的地方，我们会通过邮件与您沟通
+
+预计审核时间：1-3个工作日
+如有任何问题，请回复此邮件与我们联系。
+
+再次感谢您对科幻文学的支持！"#,
+            self.title,
+            self.author,
+            self.tags.join("、"),
+            self.email,
+            pr_url
+        )
+    }
 }
 
 impl ToHexo for Submission {
@@ -195,7 +227,7 @@ impl Submission {
         Ok(())
     }
 
-    pub async fn pull_request(&self) -> Result<()> {
+    pub async fn pull_request(&self) -> Result<String> {
         let config = AppConfig::global();
         let pat = config.github.personal_access_token.expose_secret().clone();
 
@@ -234,15 +266,22 @@ impl Submission {
             .build()
             .context("构建 Octocrab 客户端失败")?;
 
-        let _pr = octocrab
-            .pulls(owner_name, repo_name)
+        let pr = octocrab
+            .pulls(owner_name.clone(), repo_name.clone())
             .create(pr_title, self.branch.clone(), "main")
             .body(pr_body)
             .send()
             .await
             .context("创建 Pull Request 失败")?;
 
+        let url = pr
+            .html_url
+            .map(|url| url.to_string())
+            .unwrap_or_else(|| {
+                format!("https://github.com/{}/{}/pull/{}", &owner_name, &repo_name, pr.number)
+            });
+
         println!("pull request branch '{}'", self.branch);
-        Ok(())
+        Ok(url)
     }
 }
