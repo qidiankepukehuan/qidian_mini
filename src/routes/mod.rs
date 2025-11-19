@@ -1,4 +1,4 @@
-use crate::middleware::{cors, upload_limit, http_tracing, request_id};
+use crate::middleware::{cors, http_tracing, request_id, upload_limit};
 use axum::Router;
 
 mod auth;

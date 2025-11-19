@@ -3,8 +3,8 @@ use dotenv::dotenv;
 use once_cell::sync::OnceCell;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::Deserialize;
-use std::{env, fmt};
 use std::path::PathBuf;
+use std::{env, fmt};
 
 // 全局配置实例
 static CONFIG: OnceCell<AppConfig> = OnceCell::new();
@@ -59,8 +59,8 @@ impl LogLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Error => "error",
-            LogLevel::Warn  => "warn",
-            LogLevel::Info  => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
             LogLevel::Debug => "debug",
             LogLevel::Trace => "trace",
         }
@@ -77,14 +77,13 @@ impl From<LogLevel> for tracing::Level {
     fn from(v: LogLevel) -> Self {
         match v {
             LogLevel::Error => tracing::Level::ERROR,
-            LogLevel::Warn  => tracing::Level::WARN,
-            LogLevel::Info  => tracing::Level::INFO,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Info => tracing::Level::INFO,
             LogLevel::Debug => tracing::Level::DEBUG,
             LogLevel::Trace => tracing::Level::TRACE,
         }
     }
 }
-
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -97,8 +96,8 @@ pub enum LogFormat {
 impl LogFormat {
     pub fn as_str(&self) -> &'static str {
         match self {
-            LogFormat::Text    => "text",
-            LogFormat::Json    => "json",
+            LogFormat::Text => "text",
+            LogFormat::Json => "json",
             LogFormat::Compact => "compact",
         }
     }

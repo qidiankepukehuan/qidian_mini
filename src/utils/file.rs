@@ -113,8 +113,7 @@ impl ShareFile {
             ));
         }
 
-        let safe_name = validate_filename_only(file_name)
-            .map_err(|msg| anyhow::anyhow!(msg))?;
+        let safe_name = validate_filename_only(file_name).map_err(|msg| anyhow::anyhow!(msg))?;
 
         // 检查缓存
         let cache = MemMap::global();

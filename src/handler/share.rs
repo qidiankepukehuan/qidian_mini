@@ -1,15 +1,15 @@
 use crate::config::AppConfig;
 use crate::handler::auth::verify_code;
+use crate::middleware::request_id::RequestId;
 use crate::response::ApiResponse;
 use crate::utils::email::{Mailer, SmtpMailer};
 use crate::utils::file::ShareFile;
 use anyhow::Context;
-use axum::{Extension, Json};
 use axum::http::StatusCode;
+use axum::{Extension, Json};
 use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
-use tracing::{instrument, info, warn, error};
-use crate::middleware::request_id::RequestId;
+use tracing::{error, info, instrument, warn};
 
 #[derive(Deserialize)]
 pub struct ShareRequest {
@@ -39,7 +39,7 @@ pub async fn share_files(
         return ApiResponse::error(
             StatusCode::UNAUTHORIZED,
             "验证码错误或已过期",
-            request_id.into()
+            request_id.into(),
         );
     }
     info!("SHARE_FILES: verify_code success");
@@ -58,7 +58,7 @@ pub async fn share_files(
             return ApiResponse::error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("获取文件失败: {:#}", e),
-                request_id.into()
+                request_id.into(),
             );
         }
     };
@@ -98,7 +98,7 @@ pub async fn share_files(
         return ApiResponse::error(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("邮件发送失败: {:#}", e),
-            request_id.into()
+            request_id.into(),
         );
     }
     info!("SHARE_FILES: mail sent to user");
@@ -120,10 +120,7 @@ pub async fn share_files(
                 admin_email, e
             );
         } else {
-            info!(
-                "SHARE_FILES: mail sent to admin {}",
-                admin_email
-            );
+            info!("SHARE_FILES: mail sent to admin {}", admin_email);
         }
     }
 
@@ -131,10 +128,7 @@ pub async fn share_files(
     ApiResponse::success(())
 }
 
-#[instrument(
-    name = "share_list_files",
-    fields(module = "share")
-)]
+#[instrument(name = "share_list_files", fields(module = "share"))]
 pub async fn list_files(
     Extension(RequestId(request_id)): Extension<RequestId>,
 ) -> ApiResponse<Vec<String>> {
@@ -148,7 +142,7 @@ pub async fn list_files(
             ApiResponse::error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("读取文件列表失败: {:#}", e),
-                request_id.into()
+                request_id.into(),
             )
         }
     }

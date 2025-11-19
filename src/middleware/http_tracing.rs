@@ -1,9 +1,9 @@
-use axum::http::Request;
+use crate::middleware::request_id::RequestId;
 use axum::body::Body;
+use axum::http::Request;
 use tower_http::trace::{HttpMakeClassifier, TraceLayer};
 use tracing::{Level, Span};
 use uuid::Uuid;
-use crate::middleware::request_id::RequestId;
 
 pub type HttpMakeSpanFn = fn(&Request<Body>) -> Span;
 
@@ -21,9 +21,9 @@ pub fn trace_layer() -> HttpTraceLayer {
             Level::DEBUG,
             "request",
             request_id = display(rid),
-            method     = display(req.method()),
-            uri        = display(req.uri()),
-            version    = debug(req.version()),
+            method = display(req.method()),
+            uri = display(req.uri()),
+            version = debug(req.version()),
         )
     }
 

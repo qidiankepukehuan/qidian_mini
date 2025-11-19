@@ -1,16 +1,16 @@
 use crate::response::ApiResponse;
-use axum::{Extension, Json};
 use axum::http::StatusCode;
+use axum::{Extension, Json};
 
 use crate::config::AppConfig;
 use crate::handler::auth::verify_code;
+use crate::middleware::request_id::RequestId;
 use crate::utils::email::{Mailer, SmtpMailer};
 use crate::utils::github::Submission;
 use crate::utils::picture::Base64Image;
-use crate::middleware::request_id::RequestId;
 use axum_macros::debug_handler;
 use serde::Deserialize;
-use tracing::{instrument, info, warn, error};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Deserialize)]
 pub struct SubmissionRequest {
@@ -38,7 +38,7 @@ pub struct SubmissionRequest {
 )]
 pub async fn submit_article(
     Extension(RequestId(request_id)): Extension<RequestId>,
-    Json(payload): Json<SubmissionRequest>
+    Json(payload): Json<SubmissionRequest>,
 ) -> ApiResponse<()> {
     info!("SUBMIT_ARTICLE: request received");
 
@@ -78,8 +78,7 @@ pub async fn submit_article(
     let submission = Submission::from_request(payload);
     info!(
         "SUBMIT_ARTICLE: submission built, email={}, title={}",
-        submission.email,
-        submission.title,
+        submission.email, submission.title,
     );
 
     // 调用同步 push_branch
@@ -128,10 +127,7 @@ pub async fn submit_article(
 
     for email in emails {
         if let Err(e) = mailer.send(&email, &submission.to_title(), &submission.to_info()) {
-            warn!(
-                "SUBMIT_ARTICLE: mail to admin {} failed: {:#}",
-                email, e
-            );
+            warn!("SUBMIT_ARTICLE: mail to admin {} failed: {:#}", email, e);
         } else {
             info!("SUBMIT_ARTICLE: mail sent to admin {}", email);
         }

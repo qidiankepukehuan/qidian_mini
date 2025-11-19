@@ -1,7 +1,7 @@
+use crate::middleware::request_id::RequestId;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
-use crate::middleware::request_id::RequestId;
 
 /// 通用响应结构
 #[derive(Serialize)]

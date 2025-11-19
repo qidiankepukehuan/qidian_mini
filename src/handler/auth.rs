@@ -1,15 +1,15 @@
 use crate::middleware::mem_map::{MemMap, ToKey};
+use crate::middleware::request_id::RequestId;
 use crate::response::ApiResponse;
 use crate::to_key;
 use crate::utils::email::{Mailer, SmtpMailer};
-use axum::{extract::Json, http::StatusCode, Extension};
+use axum::{Extension, extract::Json, http::StatusCode};
 use chrono::Duration;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{instrument, info, warn, debug};
-use crate::middleware::request_id::RequestId;
+use tracing::{debug, info, instrument, warn};
 
 #[derive(Deserialize)]
 pub struct SendCodeRequest {
@@ -53,7 +53,10 @@ pub async fn do_send_code(
     let key = EmailVerifyKey::new(payload.email.clone());
     let ttl = Duration::minutes(5);
     cache.insert(key, code.clone(), ttl);
-    debug!("AUTH_SEND_CODE: code saved to cache, ttl={}s", ttl.num_seconds());
+    debug!(
+        "AUTH_SEND_CODE: code saved to cache, ttl={}s",
+        ttl.num_seconds()
+    );
 
     // 发送验证码
     match mailer.send_code(&payload.email, &code) {
@@ -66,7 +69,7 @@ pub async fn do_send_code(
             ApiResponse::error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("邮件发送失败: {}", e),
-                request_id.into()
+                request_id.into(),
             )
         }
     }
@@ -76,7 +79,7 @@ pub async fn do_send_code(
 #[instrument(skip(payload), fields(email = %payload.email))]
 pub async fn send_code(
     Extension(RequestId(request_id)): Extension<RequestId>,
-    Json(payload): Json<SendCodeRequest>
+    Json(payload): Json<SendCodeRequest>,
 ) -> ApiResponse<String> {
     let mailer = SmtpMailer::global();
     info!("AUTH_SEND_CODE: request received");

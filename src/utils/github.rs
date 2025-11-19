@@ -274,12 +274,12 @@ impl Submission {
             .await
             .context("创建 Pull Request 失败")?;
 
-        let url = pr
-            .html_url
-            .map(|url| url.to_string())
-            .unwrap_or_else(|| {
-                format!("https://github.com/{}/{}/pull/{}", &owner_name, &repo_name, pr.number)
-            });
+        let url = pr.html_url.map(|url| url.to_string()).unwrap_or_else(|| {
+            format!(
+                "https://github.com/{}/{}/pull/{}",
+                &owner_name, &repo_name, pr.number
+            )
+        });
 
         println!("pull request branch '{}'", self.branch);
         Ok(url)

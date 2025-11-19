@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::OnceLock;
 
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::config::{AppConfig, LogFormat};
 
