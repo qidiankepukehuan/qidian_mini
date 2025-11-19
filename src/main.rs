@@ -12,6 +12,7 @@ mod utils;
 #[tokio::main]
 async fn main() {
     let config = AppConfig::global();
+    utils::log::init_tracing();
     let app = routes::routers();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], config.port));

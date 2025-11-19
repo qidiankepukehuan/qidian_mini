@@ -18,3 +18,8 @@ emails = [
 
 [file]
 share_path = "/var"
+
+[log]
+level = "info"      # error / warn / info / debug / trace
+format = "text"  # text / json / compact
+dir = "var/log/qidian"

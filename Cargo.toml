@@ -10,13 +10,15 @@ tokio = { version = "1.47.1", features = ["default", "rt-multi-thread", "fs"] }
 # Web 框架
 axum = { version = "0.8.5", features = ["default"] }
 axum-macros = "0.5.0"
-axum-extra = "0.10.2"
+axum-extra = "0.12.2"
 
 # 中间件
 tower = { version = "0.5.2", features = ["full"] }
-tower-http = { version = "0.6.6", features = ["cors"] }
+tower-http = { version = "0.6.6", features = ["cors", "trace"] }
+tower-layer = "0.3.3"
 hyper = { version = "1.7.0", features = ["http1", "http2", "server", "client"] }
 http-body-util = "0.1.3"
+tower-service = "0.3.3"
 
 # 反序列化
 serde = { version = "1.0.228", features = ["derive"] }
@@ -42,7 +44,7 @@ once_cell = "1.21.3"
 
 # 配置文件
 dotenv = "0.15.0"
-config = { version = "0.15.17", features = ["json", "toml"] }
+config = { version = "0.15.19", features = ["json", "toml"] }
 secrecy = { version = "0.10.3", features = ["serde"] }
 
 # UUID
@@ -55,13 +57,13 @@ rand = "0.9.2"
 base64 = "0.22.1"
 
 # 图片处理库
-image = { version = "0.25.1", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "0.25.8", default-features = false, features = ["png", "jpeg", "webp"] }
 
 # 临时文件
 tempfile = "3.23.0"
 
 # Git 操作封装
-octocrab = { version = "0.47.0"}
+octocrab = { version = "0.48.0"}
 
 # URL 编码
 urlencoding = "2.1.3"
@@ -71,3 +73,8 @@ md-5 = "0.10.6"
 
 # 错误处理
 anyhow = "1.0.100"
+
+# tracing日志追踪
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2.3"

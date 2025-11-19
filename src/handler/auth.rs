@@ -2,12 +2,14 @@ use crate::middleware::mem_map::{MemMap, ToKey};
 use crate::response::ApiResponse;
 use crate::to_key;
 use crate::utils::email::{Mailer, SmtpMailer};
-use axum::{extract::Json, http::StatusCode};
+use axum::{extract::Json, http::StatusCode, Extension};
 use chrono::Duration;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use serde::Deserialize;
 use std::sync::Arc;
+use tracing::{instrument, info, warn, debug};
+use crate::middleware::request_id::RequestId;
 
 #[derive(Deserialize)]
 pub struct SendCodeRequest {
@@ -30,7 +32,9 @@ impl EmailVerifyKey {
 
 to_key!(EmailVerifyKey; module=module; email);
 
+#[instrument(skip(mailer, payload), fields(email = %payload.email))]
 pub async fn do_send_code(
+    RequestId(request_id): RequestId,
     Json(payload): Json<SendCodeRequest>,
     mailer: Arc<dyn Mailer>,
 ) -> ApiResponse<String> {
@@ -43,40 +47,57 @@ pub async fn do_send_code(
         .map(char::from)
         .collect();
 
-    // 创建键
-    let key = EmailVerifyKey::new(payload.email.clone());
+    debug!("AUTH_SEND_CODE: code generated");
 
-    // 存入缓存
-    cache.insert(key, code.clone(), Duration::minutes(5));
+    // 创建键并写缓存
+    let key = EmailVerifyKey::new(payload.email.clone());
+    let ttl = Duration::minutes(5);
+    cache.insert(key, code.clone(), ttl);
+    debug!("AUTH_SEND_CODE: code saved to cache, ttl={}s", ttl.num_seconds());
 
     // 发送验证码
     match mailer.send_code(&payload.email, &code) {
-        Ok(_) => ApiResponse::success(format!("验证码已发送到 {}", payload.email)),
-        Err(e) => ApiResponse::error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("邮件发送失败: {}", e),
-        ),
+        Ok(_) => {
+            info!(status = "success", "AUTH_SEND_CODE: mail sent");
+            ApiResponse::success(format!("验证码已发送到 {}", payload.email))
+        }
+        Err(e) => {
+            warn!(status = "failed", error = %e, "AUTH_SEND_CODE: mail send failed");
+            ApiResponse::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("邮件发送失败: {}", e),
+                request_id.into()
+            )
+        }
     }
 }
 
 // 发送验证码
-pub async fn send_code(Json(payload): Json<SendCodeRequest>) -> ApiResponse<String> {
+#[instrument(skip(payload), fields(email = %payload.email))]
+pub async fn send_code(
+    Extension(RequestId(request_id)): Extension<RequestId>,
+    Json(payload): Json<SendCodeRequest>
+) -> ApiResponse<String> {
     let mailer = SmtpMailer::global();
-    do_send_code(Json::from(payload), mailer.clone()).await
+    info!("AUTH_SEND_CODE: request received");
+    do_send_code(request_id.into(), Json::from(payload), mailer.clone()).await
 }
 
 // 验证验证码
+#[instrument(skip(code), fields(email = %email))]
 pub fn verify_code(email: String, code: String) -> bool {
     let cache = MemMap::global();
-
-    // 创建键
-    let key = EmailVerifyKey::new(email);
+    let key = EmailVerifyKey::new(email.clone());
 
     let valid = matches!(cache.get::<EmailVerifyKey, String>(&key), Some(v) if v == code);
 
     if valid {
         cache.remove(&key);
+        info!(status = "success", %email, "AUTH_VERIFY_CODE: success");
+    } else {
+        warn!(status = "failed", %email, "AUTH_VERIFY_CODE: failed");
     }
+
     valid
 }
 
@@ -89,6 +110,7 @@ mod tests {
     use http_body_util::BodyExt;
 
     use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
 
     #[derive(Clone, Default)]
     pub struct MockMailer {
@@ -114,7 +136,7 @@ mod tests {
         let send_req = SendCodeRequest {
             email: email.clone(),
         };
-        let resp = do_send_code(Json(send_req), mailer.clone())
+        let resp = do_send_code(RequestId(Uuid::new_v4()), Json(send_req), mailer.clone())
             .await
             .into_response();
         let body = resp.into_body();

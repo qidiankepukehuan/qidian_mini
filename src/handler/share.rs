@@ -4,10 +4,12 @@ use crate::response::ApiResponse;
 use crate::utils::email::{Mailer, SmtpMailer};
 use crate::utils::file::ShareFile;
 use anyhow::Context;
-use axum::Json;
+use axum::{Extension, Json};
 use axum::http::StatusCode;
 use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
+use tracing::{instrument, info, warn, error};
+use crate::middleware::request_id::RequestId;
 
 #[derive(Deserialize)]
 pub struct ShareRequest {
@@ -17,19 +19,46 @@ pub struct ShareRequest {
     pub email_code: String,
 }
 
-pub async fn share_files(Json(payload): Json<ShareRequest>) -> ApiResponse<()> {
-    // 校验验证码
+#[instrument(
+    skip(payload),
+    fields(
+        applicant = %payload.applicant,
+        email     = %payload.email,
+        apply_for = %payload.apply_for,
+    )
+)]
+pub async fn share_files(
+    Extension(RequestId(request_id)): Extension<RequestId>,
+    Json(payload): Json<ShareRequest>,
+) -> ApiResponse<()> {
+    info!("SHARE_FILES: request received");
+
+    // 校验验证码（不记录 code）
     if !verify_code(payload.email.clone(), payload.email_code.clone()) {
-        return ApiResponse::error(StatusCode::UNAUTHORIZED, "验证码错误或已过期");
+        warn!("SHARE_FILES: verify_code failed");
+        return ApiResponse::error(
+            StatusCode::UNAUTHORIZED,
+            "验证码错误或已过期",
+            request_id.into()
+        );
     }
+    info!("SHARE_FILES: verify_code success");
 
     // 获取文件（缓存 + 上传 tmpfile.link）
     let file = match ShareFile::get(&payload.apply_for).await {
-        Ok(file) => file,
+        Ok(file) => {
+            info!(
+                "SHARE_FILES: file fetched, name={}, size={}",
+                file.file_name, file.size
+            );
+            file
+        }
         Err(e) => {
+            error!("SHARE_FILES: get file failed: {:#}", e);
             return ApiResponse::error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("获取文件失败: {:#}", e),
+                request_id.into()
             );
         }
     };
@@ -65,11 +94,14 @@ pub async fn share_files(Json(payload): Json<ShareRequest>) -> ApiResponse<()> {
         .send(&payload.email, &subject_user, &body_user)
         .context("发送文件通知邮件失败")
     {
+        error!("SHARE_FILES: send mail to user failed: {:#}", e);
         return ApiResponse::error(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("邮件发送失败: {:#}", e),
+            request_id.into()
         );
     }
+    info!("SHARE_FILES: mail sent to user");
 
     // 通知管理员（不会阻断主流程）
     let admin_emails = AppConfig::global().admin.email.clone();
@@ -83,19 +115,41 @@ pub async fn share_files(Json(payload): Json<ShareRequest>) -> ApiResponse<()> {
 
     for admin_email in admin_emails {
         if let Err(e) = mailer.send(&admin_email, &subject_admin, &body_admin) {
-            eprintln!("发送邮件给管理员 {} 失败: {}", admin_email, e);
+            warn!(
+                "SHARE_FILES: send mail to admin {} failed: {:#}",
+                admin_email, e
+            );
+        } else {
+            info!(
+                "SHARE_FILES: mail sent to admin {}",
+                admin_email
+            );
         }
     }
 
+    info!("SHARE_FILES: completed");
     ApiResponse::success(())
 }
 
-pub async fn list_files() -> ApiResponse<Vec<String>> {
+#[instrument(
+    name = "share_list_files",
+    fields(module = "share")
+)]
+pub async fn list_files(
+    Extension(RequestId(request_id)): Extension<RequestId>,
+) -> ApiResponse<Vec<String>> {
     match ShareFile::list().await {
-        Ok(files) => ApiResponse::success(files),
-        Err(e) => ApiResponse::error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("读取文件列表失败: {:#}", e),
-        ),
+        Ok(files) => {
+            info!("SHARE_LIST: list files success, count={}", files.len());
+            ApiResponse::success(files)
+        }
+        Err(e) => {
+            error!("SHARE_LIST: list files failed: {:#}", e);
+            ApiResponse::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("读取文件列表失败: {:#}", e),
+                request_id.into()
+            )
+        }
     }
 }

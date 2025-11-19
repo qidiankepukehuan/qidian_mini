@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use once_cell::sync::OnceCell;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::Deserialize;
-use std::env;
+use std::{env, fmt};
 use std::path::PathBuf;
 
 // 全局配置实例
@@ -16,6 +16,7 @@ pub struct AppConfig {
     pub smtp: SmtpConfig,
     pub admin: AdminConfig,
     pub file_share: FileShareConfig,
+    pub log: LogConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +45,84 @@ pub struct FileShareConfig {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::Error => "error",
+            LogLevel::Warn  => "warn",
+            LogLevel::Info  => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        }
+    }
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<LogLevel> for tracing::Level {
+    fn from(v: LogLevel) -> Self {
+        match v {
+            LogLevel::Error => tracing::Level::ERROR,
+            LogLevel::Warn  => tracing::Level::WARN,
+            LogLevel::Info  => tracing::Level::INFO,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            LogLevel::Trace => tracing::Level::TRACE,
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    Text,
+    Json,
+    Compact,
+}
+
+impl LogFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogFormat::Text    => "text",
+            LogFormat::Json    => "json",
+            LogFormat::Compact => "compact",
+        }
+    }
+}
+
+impl fmt::Display for LogFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogConfig {
+    pub level: LogLevel,
+    pub format: LogFormat,
+    pub dir: PathBuf,
+}
+
+impl LogConfig {
+    pub fn file_for_level(&self, level: LogLevel) -> PathBuf {
+        self.dir.join(format!("{}.log", level.as_str()))
+    }
+}
+
 impl AppConfig {
     fn load_config() -> Result<Self, Box<dyn std::error::Error>> {
         // 确保 .env 文件已加载
@@ -63,6 +142,9 @@ impl AppConfig {
             .set_default("smtp.host", "smtp.163.com")?
             .set_default("admin.emails", vec!["tsblydyzbjb@qidian.space".to_string()])?
             .set_default("file.share_path", "./shared")?
+            .set_default("log.level", "info")?
+            .set_default("log.format", "compact")?
+            .set_default("log.dir", "/var/log/qidian")?
             .build()?;
 
         // 尝试从不同前缀的环境变量加载
@@ -104,6 +186,11 @@ impl AppConfig {
             file_share: FileShareConfig {
                 path: config.get::<PathBuf>("file.share_path")?,
             },
+            log: LogConfig {
+                level: config.get::<LogLevel>("log.level")?,
+                format: config.get::<LogFormat>("log.format")?,
+                dir: config.get::<PathBuf>("log.dir")?,
+            },
         })
     }
 
@@ -124,6 +211,7 @@ impl AppConfig {
             !self.smtp.host.is_empty(),
             !self.admin.email.is_empty(),
             !self.file_share.path.as_os_str().is_empty(),
+            !self.log.dir.as_os_str().is_empty(),
         ];
 
         let ok = checks.iter().filter(|&&c| c).count();
@@ -188,6 +276,9 @@ mod tests {
         assert!(!config.admin.email.is_empty());
         // 验证路径是否存在
         assert!(config.file_share.path.exists());
+
+        assert_eq!(config.log.level, LogLevel::Info);
+        assert_eq!(config.log.format, LogFormat::Compact);
 
         // 验证 stats 方法
         let (ok, total) = config.stats();
