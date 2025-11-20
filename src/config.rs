@@ -280,7 +280,7 @@ mod tests {
             config.log.level,
             LogLevel::Error | LogLevel::Warn | LogLevel::Info | LogLevel::Debug | LogLevel::Trace
         ));
-        
+
         assert!(matches!(
             config.log.format,
             LogFormat::Text | LogFormat::Json | LogFormat::Compact

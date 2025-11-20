@@ -10,6 +10,7 @@ use axum::{Extension, Json};
 use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
 use tracing::{error, info, instrument, warn};
+use crate::middleware::background::send_mail_background;
 
 #[derive(Deserialize)]
 pub struct ShareRequest {
@@ -114,14 +115,12 @@ pub async fn share_files(
     );
 
     for admin_email in admin_emails {
-        if let Err(e) = mailer.send(&admin_email, &subject_admin, &body_admin) {
-            warn!(
-                "SHARE_FILES: send mail to admin {} failed: {:#}",
-                admin_email, e
-            );
-        } else {
-            info!("SHARE_FILES: mail sent to admin {}", admin_email);
-        }
+        send_mail_background(
+            mailer.clone(),
+            admin_email.clone(),
+            subject_admin.clone(),
+            body_admin.clone(),
+        );
     }
 
     info!("SHARE_FILES: completed");

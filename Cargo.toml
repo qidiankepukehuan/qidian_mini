@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 # 异步运行时
 tokio = { version = "1.47.1", features = ["default", "rt-multi-thread", "fs"] }
+# 异步支持
+futures-util = "0.3.31"
+tokio-util = "0.7.16"
+bytes = "1.10.1"
 
 # Web 框架
 axum = { version = "0.8.5", features = ["default"] }

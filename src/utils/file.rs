@@ -1,17 +1,16 @@
-use std::path::PathBuf;
-
 use crate::config::AppConfig;
 use crate::middleware::mem_map::{MemMap, ToKey};
 use crate::to_key;
 
+use crate::utils::stream::file_stream_with_md5;
 use anyhow::{Context, Result, anyhow};
+use bytes::Bytes;
 use chrono::{Duration, Utc};
-use md5::{Digest, Md5};
-use reqwest::{Client, multipart};
+use futures_util::Stream;
+use reqwest::{Body, Client, multipart};
 use serde::{Deserialize, Serialize};
-use tokio::fs;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::{fs, io};
+use tracing::{debug, info, warn, error, instrument};
 
 // 缓存时间常量
 // 列表10分钟更新
@@ -104,37 +103,59 @@ pub struct TmpfileResponse {
 
 impl ShareFile {
     /// 从缓存或本地文件读取元数据
+    /// 从缓存或本地文件读取元数据
+    #[instrument(
+        name = "sharefile_get",
+        fields(
+            module = "sharefile",
+            file   = %file_name,
+        )
+    )]
     pub async fn get(file_name: &str) -> Result<Self> {
         let allowed = Self::list().await?;
         if !allowed.contains(&file_name.to_string()) {
+            warn!("SHAREFILE_GET: illegal file request: {}", file_name);
             return Err(anyhow!(
                 "非法文件：请选择 /list_files 返回的文件之一（收到：{}）",
                 file_name
             ));
         }
 
-        let safe_name = validate_filename_only(file_name).map_err(|msg| anyhow::anyhow!(msg))?;
+        let safe_name =
+            validate_filename_only(file_name).map_err(|msg| anyhow::anyhow!(msg))?;
 
         // 检查缓存
         let cache = MemMap::global();
         let file_key = ShareFileKey::new(&safe_name);
         if let Some(v) = cache.get::<ShareFileKey, ShareFile>(&file_key) {
+            debug!("SHAREFILE_GET: cache hit for {}", safe_name);
             return Ok(v);
         }
+        debug!("SHAREFILE_GET: cache miss for {}, reading from disk", safe_name);
 
         let config = AppConfig::global();
         let file_path = config.file_share.path.join(&safe_name);
 
         // 文件是否存在
         if !file_path.exists() {
+            error!("SHAREFILE_GET: file not found: {}", file_path.display());
             return Err(anyhow!("文件不存在: {}", file_path.display()));
         }
 
-        // 计算MD5哈希
-        // 直接 await，简单直观
-        let md5 = Self::get_md5_from_filepath(&file_path).await?;
-        // 上传文件
-        let upload_info = Self::upload_to_tmpfile(&file_path).await?;
+        // 1. 构造“带 md5 副作用”的流
+        let (stream, md5_handle) = file_stream_with_md5(&file_path).await?;
+        debug!("SHAREFILE_GET: stream with md5 created for {}", safe_name);
+
+        // 2. 流式上传
+        let upload_info = Self::upload_stream_to_tmpfile(&safe_name, stream).await?;
+        info!(
+            "SHAREFILE_GET: upload completed, file={}, size={}",
+            upload_info.file_name, upload_info.size
+        );
+
+        // 3. 上传结束后再 finalize md5
+        let md5 = md5_handle.finalize()?;
+        debug!(%md5, "SHAREFILE_GET: md5 finalized");
 
         let share_file = ShareFile {
             file_name: safe_name.to_string(),
@@ -148,64 +169,71 @@ impl ShareFile {
 
         // 更新到cache
         cache.insert(file_key, share_file.clone(), FILE_TTL);
+        debug!("SHAREFILE_GET: cache updated for {}", share_file.file_name);
 
         Ok(share_file)
     }
 
-    /// 计算对应文件的md5
-    pub async fn get_md5_from_filepath(file_path: &PathBuf) -> Result<String> {
-        let mut file = File::open(&file_path).await?;
-        let mut hasher = Md5::new();
-        let mut buffer = [0; 16 * 1024];
-        loop {
-            let bytes_read = file.read(&mut buffer).await?;
-            if bytes_read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..bytes_read]);
-        }
-        let md5 = format!("{:x}", hasher.finalize());
-        Ok(md5)
-    }
+    /// 通过任意字节流上传到 tmpfile.link（流式）
+    #[instrument(
+        name = "sharefile_upload_stream",
+        skip(stream),
+        fields(
+            module   = "sharefile",
+            filename = %filename,
+        )
+    )]
+    pub async fn upload_stream_to_tmpfile<S>(
+        filename: &str,
+        stream: S,
+    ) -> Result<TmpfileResponse>
+    where
+        S: Stream<Item = Result<Bytes, io::Error>> + Send + 'static,
+    {
+        debug!("SHAREFILE_UPLOAD: building request body");
 
-    /// 上传到 tmpfile.link
-    pub async fn upload_to_tmpfile(path: &PathBuf) -> Result<TmpfileResponse> {
-        // 读取文件内容
-        let filename = path
-            .file_name()
-            .ok_or_else(|| anyhow!("文件名无效"))?
-            .to_string_lossy()
-            .to_string();
-        let bytes = tokio::fs::read(&path).await?;
+        // 用 stream 构造 reqwest Body
+        let body = Body::wrap_stream(stream);
 
-        // 构造 multipart
-        let part = multipart::Part::bytes(bytes)
-            .file_name(filename.clone())
+        // multipart 的 file part 使用 stream
+        let part = multipart::Part::stream(body)
+            .file_name(filename.to_string())
             .mime_str("application/octet-stream")?;
 
         let form = multipart::Form::new().part("file", part);
         let client = Client::new();
 
+        debug!("SHAREFILE_UPLOAD: sending request to tmpfile.link");
         let resp = client
             .post("https://tmpfile.link/api/upload")
             .multipart(form)
             .send()
             .await?
-            .error_for_status()?
-            .json::<TmpfileResponse>()
-            .await?;
+            .error_for_status()?;
 
-        Ok(resp)
+        let tmp_resp = resp.json::<TmpfileResponse>().await?;
+        info!(
+            "SHAREFILE_UPLOAD: upload finished, remote_file={}, size={}",
+            tmp_resp.file_name, tmp_resp.size
+        );
+
+        Ok(tmp_resp)
     }
 
     /// 获取文件列表（带缓存）
+    #[instrument(
+        name = "sharefile_list",
+        fields(module = "sharefile")
+    )]
     pub async fn list() -> Result<Vec<String>> {
         let cache = MemMap::global();
         let list_key = ShareFileListKey::new();
 
         if let Some(v) = cache.get::<ShareFileListKey, Vec<String>>(&list_key) {
+            debug!("SHAREFILE_LIST: cache hit, count={}", v.len());
             return Ok(v);
         }
+        debug!("SHAREFILE_LIST: cache miss, reading directory");
 
         let config = AppConfig::global();
         let dir_path = &config.file_share.path;
@@ -226,8 +254,14 @@ impl ShareFile {
             }
         }
 
+        debug!(
+            "SHAREFILE_LIST: directory scan finished, count={}",
+            file_names.len()
+        );
+
         // 更新缓存
         cache.insert(list_key, file_names.clone(), LIST_TTL);
+        debug!("SHAREFILE_LIST: cache updated");
 
         Ok(file_names)
     }

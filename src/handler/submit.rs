@@ -11,6 +11,7 @@ use crate::utils::picture::Base64Image;
 use axum_macros::debug_handler;
 use serde::Deserialize;
 use tracing::{error, info, instrument, warn};
+use crate::middleware::background::send_mail_background;
 
 #[derive(Deserialize)]
 pub struct SubmissionRequest {
@@ -107,8 +108,6 @@ pub async fn submit_article(
         }
     };
 
-    let emails = AppConfig::global().admin.email.clone();
-
     if let Err(e) = mailer.send(
         &submission.email,
         &submission.to_title(),
@@ -125,12 +124,14 @@ pub async fn submit_article(
         );
     }
 
-    for email in emails {
-        if let Err(e) = mailer.send(&email, &submission.to_title(), &submission.to_info()) {
-            warn!("SUBMIT_ARTICLE: mail to admin {} failed: {:#}", email, e);
-        } else {
-            info!("SUBMIT_ARTICLE: mail sent to admin {}", email);
-        }
+    let admin_emails = AppConfig::global().admin.email.clone();
+    for admin_email in admin_emails {
+        send_mail_background(
+            mailer.clone(),
+            admin_email.clone(), 
+            submission.to_title(), 
+            submission.to_info()
+        );
     }
 
     info!("SUBMIT_ARTICLE: completed");
