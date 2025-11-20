@@ -1,0 +1,63 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
+
+  release:
+    # 只有在 tag push 的时候才执行
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 GitHub Release / 上传资产必需
+
+    env:
+      APP_NAME: QidianMini
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Build static binary (musl)
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl
+          ls -al target/x86_64-unknown-linux-musl/release
+
+      - name: Package binary
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/$APP_NAME $APP_NAME-linux-amd64
+          tar -czf $APP_NAME-linux-amd64.tar.gz $APP_NAME-linux-amd64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.APP_NAME }}-linux-amd64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
